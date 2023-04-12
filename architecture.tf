@@ -2,6 +2,22 @@ provider "aws" {
   region = "us-east-1"
 }
 
+resource "aws_iam_role" "role" {
+  name = "role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
 resource "aws_security_group" "set_the_ports" {
   name_prefix = "set_the_ports"
   vpc_id      = "vpc-007983d27896708f3"
@@ -45,9 +61,11 @@ resource "aws_security_group" "set_the_ports" {
 resource "aws_instance" "ec2_instance" {
   ami                         = "ami-00c39f71452c08778"
   instance_type               = "t2.micro"
-  vpc_security_groups_ids     = [aws_security_group.set_the_ports.id]
+  vpc_security_group_ids     = [aws_security_group.set_the_ports.id]
   key_name                    = "Second_try"
   associate_public_ip_address = true
+
+  iam_instance_profile = "${aws_iam_instance_profile.profile.name}"
   user_data = <<-EOF
     #!/bin/bash
     sudo yum update -y
@@ -58,22 +76,27 @@ resource "aws_instance" "ec2_instance" {
     EOF
 }
 
-resource "aws_s3_bucket_object" "html_files" {
-  bucket = "nginxhtmlfiles"
-  key    = "index_new.html"
-  source = "${docker_container.nginx.id}:/usr/share/nginx/html/index.html"
+resource "aws_iam_instance_profile" "profile" {
+  name = "profile"
+  role = "${aws_iam_role.role.name}"
 }
 
-resource "aws_lb" "load_balancer" {
-  name               = "load_balancer"
+# resource "aws_s3_bucket_object" "html_files" {
+#   bucket = "nginxhtmlfiles"
+#   key    = "index_new.html"
+#   source = "nginx:/usr/share/nginx/html/index.html"
+# }
+
+resource "aws_lb" "loadBalancer" {
+  name               = "loadBalancer"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.set_the_ports.id]
   subnets            = ["subnet-0f37b41bc055ea4c1", "subnet-069047187f4cdd06d"]
 }
 
-resource "aws_lb_target_group" "target_group_lb" {
-  name     = "target_group_lb"
+resource "aws_lb_target_group" "targetGroupLb" {
+  name     = "targetGroupLb"
   port     = 80
   protocol = "HTTP"
   vpc_id   = "vpc-007983d27896708f3"
@@ -91,17 +114,17 @@ resource "aws_lb_target_group" "target_group_lb" {
 }
 
 resource "aws_lb_listener" "listener_lb" {
-  load_balancer_arn = aws_lb.load_balancer.arn
+  load_balancer_arn = aws_lb.loadBalancer.arn
   port              = "80"
   protocol          = "HTTP"
   default_action {
-    target_group_arn = aws_lb_target_group.target_group_lb.arn
+    target_group_arn = aws_lb_target_group.targetGroupLb.arn
     type             = "forward"
   }
 }
 
 resource "aws_lb_target_group_attachment" "target_group_instance" {
-  target_group_arn = aws_lb_target_group.target_group_lb.arn
+  target_group_arn = aws_lb_target_group.targetGroupLb.arn
   target_id        = aws_instance.ec2_instance.id
   port             = 80
 }
@@ -112,10 +135,11 @@ resource "aws_instance" "ec2_instance2" {
   vpc_security_group_ids      = [aws_security_group.set_the_ports.id]
   key_name                    = "Second_try"
   associate_public_ip_address = true
+  iam_instance_profile = "${aws_iam_instance_profile.profile.name}"
 }
 
 resource "aws_lb_target_group_attachment" "target_group_instance2" {
-  target_group_arn = aws_lb_target_group.target_group_lb.arn
+  target_group_arn = aws_lb_target_group.targetGroupLb.arn
   target_id        = aws_instance.ec2_instance2.id
   port             = 80
 }
